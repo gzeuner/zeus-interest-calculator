@@ -262,17 +262,29 @@ public class InterestController {
     public ResponseEntity<Resource> downloadPlan(HttpServletRequest request) throws IOException {
 
         HttpSession session = request.getSession(false);
-        @SuppressWarnings("unchecked")
-        List<PaymentPlanResponse> results = (session != null)
-                ? (List<PaymentPlanResponse>) session.getAttribute("results") : null;
+        if (session == null) return ResponseEntity.badRequest().build();
 
-        if (results == null) {
+        // Ursprüngliche Anfrage wiederherstellen
+        PaymentPlanRequest orig = (PaymentPlanRequest) session.getAttribute("origRequest");
+        @SuppressWarnings("unchecked")
+        List<PaymentPlanResponse> currentResults =
+                (List<PaymentPlanResponse>) session.getAttribute("results");
+
+        // Falls Sondertilgungen gesetzt sind → Plan neu berechnen
+        List<PaymentPlanResponse> results;
+        if (orig != null && orig.getExtraPayments() != null && !orig.getExtraPayments().isEmpty()) {
+            results = doCalculation(orig);
+            session.setAttribute("results", results); // neuen Plan auch in der Session aktualisieren
+        } else {
+            results = currentResults;
+        }
+
+        if (results == null || results.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
 
-        // Datei physisch speichern
         String fileId = storageService.save(results);
-        byte[] data   = storageService.loadRaw(fileId);           // sofort wieder auslesen
+        byte[] data   = storageService.loadRaw(fileId);
 
         ByteArrayResource res = new ByteArrayResource(data);
         return ResponseEntity.ok()
@@ -366,24 +378,24 @@ public class InterestController {
                 }
             }
 
-            /* Kredit-spezifischer Abbruch */
+            // Kredit-spezifischer Abbruch
             if (req.getMode() == CalculationMode.LOAN) {
                 if (plan.getFutureValue() < 0) {
                     double corrected = plan.getRegularPaymentAmount() + plan.getFutureValue();
                     plan.setRegularPaymentAmount(Math.max(0, corrected));
                     svc.calculate(plan);
-                    list.add(mapToResponse(plan));
+                    list.add(mapToResponse(plan, extra)); // ← extra mitgeben
                     break;
                 }
                 if (plan.getInitialValue() < plan.getRegularPaymentAmount()) {
                     plan.setRegularPaymentAmount(plan.getInitialValue());
                     svc.calculate(plan);
-                    list.add(mapToResponse(plan));
+                    list.add(mapToResponse(plan, extra)); // ← extra mitgeben
                     break;
                 }
             }
 
-            list.add(mapToResponse(plan));
+            list.add(mapToResponse(plan, extra)); // ← extra mitgeben
             plan = plan.copyNextRun();
         }
         return list;
@@ -408,7 +420,7 @@ public class InterestController {
         return plan;
     }
 
-    private PaymentPlanResponse mapToResponse(PaymentPlanElement e) {
+    private PaymentPlanResponse mapToResponse(PaymentPlanElement e, double extraPayment) {
         Locale loc = Locale.getDefault();
         DateTimeFormatter fmt = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(loc);
 
@@ -430,8 +442,13 @@ public class InterestController {
         r.setIsGroup(String.valueOf(e.isLastDayOfYear()));
         r.setIsLastRun(String.valueOf(e.isLastRun()));
         r.setYear(e.getRepaymentDate().getYear());
+
+        // 🟢 Sonderzahlung explizit hinzufügen
+        r.setExtraPayment(String.format("%.2f", extraPayment));
+
         return r;
     }
+
 
     private Map<Integer, List<PaymentPlanResponse>> groupByYear(List<PaymentPlanResponse> list) {
         return list.stream()

@@ -60,4 +60,7 @@ public class PaymentPlanResponse {
 
     /** Kennzeichen, ob dies die letzte Periode ist */
     private String isLastRun;
+
+    /** Sondertilgung in dieser Periode (z.B. "0,00" oder "3.000,00") */
+    private String extraPayment;
 }
