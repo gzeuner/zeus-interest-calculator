@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<!-- Sprachumschalter-Fragment -->
+<div th:fragment="languageSwitcher(currentPath)">
+    <div class="mb-4 text-end">
+        <button type="button"
+                class="btn btn-outline-secondary btn-sm"
+                th:classappend="${#locale.language == 'de'} ? 'disabled' : ''"
+                th:text="#{lang.german}"
+                onclick="switchLanguage('de')">Deutsch</button>
+        <button type="button"
+                class="btn btn-outline-secondary btn-sm"
+                th:classappend="${#locale.language == 'en'} ? 'disabled' : ''"
+                th:text="#{lang.english}"
+                onclick="switchLanguage('en')">English</button>
+    </div>
+
+    <script>
+        function switchLanguage(lang) {
+            // Finde das Formular mit der ID 'interestForm'
+            const form = document.getElementById('interestForm');
+            if (form) {
+                // Erstelle ein verstecktes Input-Feld für den 'lang'-Parameter
+                const langInput = document.createElement('input');
+                langInput.type = 'hidden';
+                langInput.name = 'lang';
+                langInput.value = lang;
+                form.appendChild(langInput);
+                // Sende das Formular ab
+                form.submit();
+            } else {
+                // Fallback: Direkte GET-Anfrage, falls kein Formular vorhanden
+                window.location.href = window.location.pathname + '?lang=' + lang;
+            }
+        }
+    </script>
+</div>
+</body>
+</html>

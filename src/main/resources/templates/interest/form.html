@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{form.heading}">Zinsrechner</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body class="container mt-5">
+
+<!-- Language Switcher -->
+<div th:replace="~{layout/fragments :: languageSwitcher(${currentPath})}"></div>
+
+<h2 th:text="#{form.heading}">Zinsrechner</h2>
+
+<!-- Alerts -->
+<div th:if="${errorMessage}" class="alert alert-danger" role="alert" th:text="${errorMessage}"></div>
+<div th:if="${successMessage}" class="alert alert-success" role="alert" th:text="${successMessage}"></div>
+
+<!-- ========================= Hauptformular: Berechnung ========================= -->
+<form id="interestForm"
+      th:action="@{/interest}"
+      th:object="${paymentRequest}"
+      method="post"
+      class="row g-3">
+
+    <!-- Anfangswert -->
+    <div class="col-md-6">
+        <label for="initialValue" class="form-label" th:text="#{form.initialValue}">Anfangswert (€)</label>
+        <input type="text" class="form-control" id="initialValue" th:field="*{initialValue}"
+               th:value="${#numbers.formatDecimal(paymentRequest.initialValue,1,2,#locale.language=='de'?'COMMA':'POINT')}"
+               inputmode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" title="#{form.input.decimal.hint}" required/>
+        <div th:if="${#fields.hasErrors('initialValue')}" class="invalid-feedback" th:errors="*{initialValue}"></div>
+    </div>
+
+    <!-- Zinssatz -->
+    <div class="col-md-6">
+        <label for="interestRate" class="form-label" th:text="#{form.interestRate}">Zinssatz (%)</label>
+        <input type="text" class="form-control" id="interestRate" th:field="*{interestRate}"
+               th:value="${#numbers.formatDecimal(paymentRequest.interestRate,1,2,#locale.language=='de'?'COMMA':'POINT')}"
+               inputmode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" title="#{form.input.decimal.hint}" required/>
+        <div th:if="${#fields.hasErrors('interestRate')}" class="invalid-feedback" th:errors="*{interestRate}"></div>
+    </div>
+
+    <!-- Manuelle Zinskorrektur -->
+    <div class="col-md-6">
+        <label for="manualFirstInterest" class="form-label" th:text="#{form.manualFirstInterest}"></label>
+        <input type="text" class="form-control" id="manualFirstInterest" th:field="*{manualFirstInterest}"
+               th:value="${paymentRequest.manualFirstInterest != null ? #numbers.formatDecimal(paymentRequest.manualFirstInterest,1,2,#locale.language=='de'?'COMMA':'POINT') : ''}"
+               inputmode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" title="#{form.input.decimal.hint}"/>
+        <small class="form-text text-muted" th:text="#{form.manualFirstInterestHint}"></small>
+        <div th:if="${#fields.hasErrors('manualFirstInterest')}" class="invalid-feedback" th:errors="*{manualFirstInterest}"></div>
+    </div>
+
+    <!-- Monatliche Rate -->
+    <div class="col-md-6">
+        <label for="paymentAmount" class="form-label" th:text="#{form.paymentAmount}"></label>
+        <input type="text" class="form-control" id="paymentAmount" th:field="*{paymentAmount}"
+               th:value="${#numbers.formatDecimal(paymentRequest.paymentAmount,1,2,#locale.language=='de'?'COMMA':'POINT')}"
+               inputmode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" title="#{form.input.decimal.hint}" required/>
+        <div th:if="${#fields.hasErrors('paymentAmount')}" class="invalid-feedback" th:errors="*{paymentAmount}"></div>
+    </div>
+
+    <!-- Laufzeit -->
+    <div class="col-md-6">
+        <label for="paymentMonths" class="form-label" th:text="#{form.paymentMonths}"></label>
+        <input type="number" class="form-control" id="paymentMonths" th:field="*{paymentMonths}" min="1" required/>
+        <div th:if="${#fields.hasErrors('paymentMonths')}" class="invalid-feedback" th:errors="*{paymentMonths}"></div>
+    </div>
+
+    <!-- Vertragsdatum -->
+    <div class="col-md-6">
+        <label for="contractDate" class="form-label" th:text="#{form.contractDate}"></label>
+        <input type="date" class="form-control" id="contractDate" th:field="*{contractDate}" required/>
+        <small class="form-text text-muted" th:text="#{form.contractDateHint}"></small>
+        <div th:if="${#fields.hasErrors('contractDate')}" class="invalid-feedback" th:errors="*{contractDate}"></div>
+    </div>
+
+    <!-- Startdatum -->
+    <div class="col-md-6">
+        <label for="firstPaymentDate" class="form-label" th:text="#{form.firstPaymentDate}"></label>
+        <input type="date" class="form-control" id="firstPaymentDate" th:field="*{firstPaymentDate}" required/>
+        <small class="form-text text-muted" th:text="#{form.dateHint}"></small>
+        <div th:if="${#fields.hasErrors('firstPaymentDate')}" class="invalid-feedback" th:errors="*{firstPaymentDate}"></div>
+    </div>
+
+    <!-- Modus -->
+    <div class="col-md-6">
+        <label for="mode" class="form-label" th:text="#{form.mode}"></label>
+        <select class="form-select" id="mode" th:field="*{mode}">
+            <option value="LOAN" th:text="#{form.mode.loan}">Kredit</option>
+            <option value="DEPOSIT" th:text="#{form.mode.deposit}">Einlage</option>
+        </select>
+        <div th:if="${#fields.hasErrors('mode')}" class="invalid-feedback" th:errors="*{mode}"></div>
+    </div>
+
+    <!-- Berechnen Button -->
+    <div class="col-12">
+        <button type="submit" class="btn btn-primary" th:text="#{form.button}">Berechnen</button>
+    </div>
+</form>
+
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="#{title.result}">Berechnungsergebnis</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+</head>
+<body class="container mt-5">
+
+<!-- Language Switcher -->
+<div th:replace="~{layout/fragments :: languageSwitcher(${currentPath})}"></div>
+
+<h2 th:text="#{heading.result}">Ergebnis: Zahlungsplan</h2>
+
+<!-- Alerts -->
+<div th:if="${errorMessage}" class="alert alert-danger" role="alert" th:text="${errorMessage}"></div>
+<div th:if="${successMessage}" class="alert alert-success" role="alert" th:text="${successMessage}"></div>
+
+<h5 class="mb-3">
+    <span th:text="#{monthly.rate}">Monatliche Rate</span>:
+    <span th:text="${monthlyRate} + ' €'">100 €</span>
+</h5>
+
+<p><strong th:text="#{start.date}">Startdatum:</strong> <span th:text="${firstDate}">–</span></p>
+
+
+<!-- ================= Ergebnis‑Tabelle + Sonderzahlungen ================= -->
+<form th:action="@{/interest/result}" th:object="${paymentRequest}" method="post">
+    <input type="hidden" th:field="*{initialValue}"/>
+    <input type="hidden" th:field="*{interestRate}"/>
+    <input type="hidden" th:field="*{paymentAmount}"/>
+    <input type="hidden" th:field="*{paymentMonths}"/>
+    <input type="hidden" th:field="*{firstPaymentDate}"/>
+    <input type="hidden" th:field="*{mode}"/>
+
+    <table class="table table-bordered table-striped">
+        <thead>
+        <tr>
+            <th th:text="#{table.month}">Monat</th>
+            <th th:text="#{table.initial}">Startwert (€)</th>
+            <th th:text="#{table.interest}">Zinsen (€)</th>
+            <th th:text="#{table.rate}">Rate (€)</th>
+            <th th:text="#{table.change}">Veränderung (€)</th>
+            <th th:text="#{table.future}">Neuer Stand (€)</th>
+            <th th:text="#{table.repayment}">Abbuchung</th>
+            <th th:text="#{table.extraPayment}">Sonderzahlung</th>
+        </tr>
+        </thead>
+        <tbody>
+        <th:block th:each="entry : ${groupedResults.entrySet()}">
+            <!-- ​​Jahres‑Header ​​-->
+            <tr class="table-primary year-toggle" th:id="${'group-' + entry.key}" th:onclick="|toggleYear(${entry.key})|">
+                <td colspan="8"><strong th:text="${entry.key}">2025</strong>&nbsp;–&nbsp;<span th:text="#{click.to.toggle}"></span></td>
+            </tr>
+            <!-- Summenzeile -->
+            <tr class="table-secondary year-summary" th:id="${'summary-' + entry.key}">
+                <td><strong>Summe</strong></td><td></td>
+                <td class="sum-interest">0,00 €</td>
+                <td class="sum-rate">0,00 €</td>
+                <td class="sum-change">0,00 €</td>
+                <td></td><td></td>
+                <td class="sum-extra">0,00 €</td>
+            </tr>
+            <!-- Monatszeilen -->
+            <th:block th:each="row : ${entry.value}">
+                <tr th:id="${'year-' + row.year}" class="month-row">
+                    <td th:text="${row.runNumber}">1</td>
+                    <td th:text="${row.initialValue}">1.000,00</td>
+                    <td th:text="${row.interestAmount}">10,00</td>
+                    <td th:text="${row.regularPaymentAmount}">100,00</td>
+                    <td th:text="${row.amountChangeValue}">‑90,00</td>
+                    <td th:text="${row.futureValue}">910,00</td>
+                    <td th:text="${row.repaymentDate}">01.05.2025</td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm extra-input"
+                               th:field="*{extraPayments[__${row.runNumber}__]}" placeholder="0,00"
+                               inputmode="decimal"
+                               oninput="this.value=this.value.replace(',','.');"
+                               onkeydown="if(event.key==='Enter'){this.form.submit();}">
+                    </td>
+                </tr>
+            </th:block>
+        </th:block>
+        </tbody>
+    </table>
+</form>
+
+<script>
+    function toggleYear(y){document.querySelectorAll('#year-'+y).forEach(r=>r.classList.toggle('d-none'));}
+    function toNumber(s){return parseFloat((s||'').replace(/[^0-9,.-]/g,'').replace(/\./g,'').replace(',','.'))||0;}
+    const fmt=new Intl.NumberFormat('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2});
+    function formatEuro(n){return fmt.format(n)+'\u00A0€';}
+    document.addEventListener('DOMContentLoaded',()=>{
+        const totals={};
+        document.querySelectorAll('tr.month-row').forEach(r=>{
+            const y=r.id.split('-')[1],c=r.querySelectorAll('td');
+            const int=toNumber(c[2].innerText),rate=toNumber(c[3].innerText),chg=toNumber(c[4].innerText);
+            const extraCell=c[7];
+            const extra=extraCell.querySelector('input')?toNumber(extraCell.querySelector('input').value):toNumber(extraCell.innerText);
+            (totals[y]??={interest:0,rate:0,change:0,extra:0});
+            totals[y].interest+=int;totals[y].rate+=rate;totals[y].change+=chg;totals[y].extra+=extra;
+        });
+        Object.entries(totals).forEach(([y,s])=>{
+            const row=document.getElementById('summary-'+y);
+            if(row){row.querySelector('.sum-interest').innerText=formatEuro(s.interest);
+                row.querySelector('.sum-rate').innerText=formatEuro(s.rate);
+                row.querySelector('.sum-change').innerText=formatEuro(s.change);
+                row.querySelector('.sum-extra').innerText=formatEuro(s.extra);} });
+        const ym=new Map();
+        document.querySelectorAll('tr.month-row').forEach(r=>{const y=r.id.split('-')[1];(ym.get(y)||ym.set(y,[]).get(y)).push(r)});
+        const ys=[...ym.keys()];
+        if(ys.length>2){const f=ys[0],l=ys[ys.length-1];ys.forEach(y=>{if(y!==f&&y!==l)ym.get(y).forEach(r=>r.classList.add('d-none'));});}
+    });
+</script>
+
+</body>
+</html>
