@@ -22,8 +22,19 @@
     <span th:text="#{monthly.rate}">Monatliche Rate</span>:
     <span th:text="${monthlyRate} + ' €'">100 €</span>
 </h5>
+<!-- === Gespeicherte Pläne laden/löschen === -->
+<div class="mb-4">
+    <h5>Gespeicherte Zahlungspläne</h5>
+    <div id="planList" class="list-group mb-2"></div>
+    <button class="btn btn-outline-secondary btn-sm" onclick="fetchPlans()">Aktualisieren</button>
+</div>
 
 <p><strong th:text="#{start.date}">Startdatum:</strong> <span th:text="${firstDate}">–</span></p>
+<form th:action="@{/interest/save}" method="post" class="mb-4">
+    <button type="submit" class="btn btn-outline-primary">
+        💾 Plan speichern
+    </button>
+</form>
 
 
 <!-- ================= Ergebnis‑Tabelle + Sonderzahlungen ================= -->
@@ -113,6 +124,76 @@
         const ys=[...ym.keys()];
         if(ys.length>2){const f=ys[0],l=ys[ys.length-1];ys.forEach(y=>{if(y!==f&&y!==l)ym.get(y).forEach(r=>r.classList.add('d-none'));});}
     });
+    async function fetchPlans() {
+        const list = document.getElementById('planList');
+        list.innerHTML = '<div class="text-muted">Lade Pläne…</div>';
+        try {
+            const res = await fetch('/api/plans');
+            const ids = await res.json();
+            if (ids.length === 0) {
+                list.innerHTML = '<div class="text-muted">Keine gespeicherten Pläne gefunden.</div>';
+                return;
+            }
+            list.innerHTML = '';
+            ids.forEach(id => {
+                const item = document.createElement('div');
+                item.className = 'list-group-item d-flex justify-content-between align-items-center';
+                item.innerHTML = `
+                    <code>${id}</code>
+                    <div>
+                        <a href="/api/plans/${id}/raw" class="btn btn-sm btn-outline-primary me-1" title="Download">⬇️</a>
+                        <button class="btn btn-sm btn-outline-success me-1" onclick="loadPlan('${id}')">Laden</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deletePlan('${id}')">🗑️</button>
+                    </div>`;
+                list.appendChild(item);
+            });
+        } catch (e) {
+            list.innerHTML = '<div class="text-danger">Fehler beim Laden der Liste.</div>';
+        }
+    }
+
+ async function loadPlan(id) {
+        const res = await fetch(`/api/plans/${id}`);
+        if (!res.ok) {
+            alert("Fehler beim Laden des Plans.");
+            return;
+        }
+
+        const planJson = await res.json();
+        const blob = new Blob([JSON.stringify(planJson)], { type: 'application/json' });
+        const file = new File([blob], "plan.json", { type: 'application/json' });
+
+        // Formular dynamisch erzeugen
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/interest/load';
+        form.enctype = 'multipart/form-data';
+
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.name = 'planFile';
+
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        input.files = dataTransfer.files;
+
+        form.appendChild(input);
+        document.body.appendChild(form);
+
+        form.submit();
+    }
+
+    async function deletePlan(id) {
+        if (!confirm('Diesen Plan wirklich löschen?')) return;
+        const res = await fetch(`/api/plans/${id}`, {method: 'DELETE'});
+        if (res.ok) {
+            fetchPlans(); // neu laden
+        } else {
+            alert('Löschen fehlgeschlagen');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', fetchPlans);
 </script>
 
 </body>

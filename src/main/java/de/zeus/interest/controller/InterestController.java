@@ -38,6 +38,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.beans.PropertyEditorSupport;
 import java.io.IOException;
@@ -176,10 +177,12 @@ public class InterestController {
     public String applyExtras(@ModelAttribute("paymentRequest") @Valid PaymentPlanRequest req,
                               BindingResult result,
                               HttpServletRequest httpRequest,
+                              RedirectAttributes redirectAttributes,
                               Model model) {
 
         if (req.getExtraPayments() == null) req.setExtraPayments(new HashMap<>());
-        HttpSession session = httpRequest.getSession();
+        HttpSession session = httpRequest.getSession(true); // ← wichtig!
+
         session.setAttribute("origRequest", req);
 
         if (result.hasErrors()) {
@@ -187,12 +190,22 @@ public class InterestController {
                     httpRequest, model,
                     messageSource.getMessage("validation.errors", null, Locale.getDefault()));
         }
+
         try {
             validateRequest(req);
-            validateExtraPayments(req);               // erst prüfen …
-            List<PaymentPlanResponse> results = doCalculation(req); // … dann rechnen
-            session.setAttribute("results", results);
+            validateExtraPayments(req);
+
+            List<PaymentPlanResponse> results = doCalculation(req);
+
+            session.setAttribute("results", results); // ✅ aktualisierter Plan
+            session.setAttribute("firstDate", results.isEmpty() ? "" : results.get(0).getRepaymentDate());
+            session.setAttribute("monthlyRate", String.format("%.2f", req.getPaymentAmount()));
+
+            // ✅ Erfolgsmeldung übergeben – survives redirect
+            redirectAttributes.addFlashAttribute("successMessage", "Sondertilgungen angewendet. Du kannst den neuen Plan speichern.");
+
             return "redirect:/interest/result";
+
         } catch (IllegalArgumentException ex) {
             return reRender(req, (List<PaymentPlanResponse>) session.getAttribute("results"),
                     httpRequest, model, ex.getMessage());

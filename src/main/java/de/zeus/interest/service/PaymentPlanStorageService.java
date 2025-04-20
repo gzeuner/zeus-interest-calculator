@@ -17,12 +17,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Service zur Speicherung und Wiederherstellung von Zahlungsplänen.
@@ -34,28 +33,16 @@ public class PaymentPlanStorageService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final Path storageDir;
 
-    /**
-     * Konstruktor, der das Speicherverzeichnis initialisiert (Default: "payment-plans").
-     *
-     * @param storageDir Speicherpfad (kann via `paymentplan.storage.dir` gesetzt werden)
-     */
     public PaymentPlanStorageService(
             @Value("${paymentplan.storage.dir:payment-plans}") String storageDir) {
         this.storageDir = Paths.get(storageDir);
         try {
-            // Verzeichnis bei Bedarf anlegen
             Files.createDirectories(this.storageDir);
         } catch (IOException e) {
             throw new RuntimeException("Could not create storage directory", e);
         }
     }
 
-    /**
-     * Speichert einen Zahlungsplan als JSON-Datei und gibt eine eindeutige File-ID zurück.
-     *
-     * @param plan Liste mit Monatsraten etc.
-     * @return generierte File-ID (Timestamp + UUID)
-     */
     public String save(List<PaymentPlanResponse> plan) {
         String fileId = Instant.now().toEpochMilli() + "-" + UUID.randomUUID();
         Path file = storageDir.resolve(fileId + ".json");
@@ -67,12 +54,6 @@ public class PaymentPlanStorageService {
         return fileId;
     }
 
-    /**
-     * Lädt einen zuvor gespeicherten Zahlungsplan anhand der File-ID.
-     *
-     * @param fileId ID der Datei ohne Endung
-     * @return Liste der gespeicherten Monatsdaten
-     */
     public List<PaymentPlanResponse> load(String fileId) {
         Path file = storageDir.resolve(fileId + ".json");
         if (!Files.exists(file))
@@ -85,14 +66,57 @@ public class PaymentPlanStorageService {
         }
     }
 
-    /**
-     * Gibt den rohen JSON-Inhalt einer Datei zurück (für Downloads).
-     *
-     * @param fileId ID der Datei
-     * @return Byte-Array mit JSON-Inhalt
-     * @throws IOException bei Zugriffsfehlern
-     */
     public byte[] loadRaw(String fileId) throws IOException {
         return Files.readAllBytes(storageDir.resolve(fileId + ".json"));
     }
+
+    /**
+     * Löscht einen gespeicherten Plan.
+     *
+     * @param fileId Datei-ID ohne Endung
+     * @return true, wenn erfolgreich gelöscht
+     */
+    public boolean delete(String fileId) {
+        try {
+            return Files.deleteIfExists(storageDir.resolve(fileId + ".json"));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to delete payment plan", e);
+        }
+    }
+
+    /**
+     * Gibt eine Liste aller gespeicherten File-IDs zurück.
+     */
+    public List<String> listAll() {
+        try (Stream<Path> stream = Files.list(storageDir)) {
+            return stream
+                    .filter(p -> p.toString().endsWith(".json"))
+                    .map(p -> p.getFileName().toString().replace(".json", ""))
+                    .sorted(Comparator.reverseOrder()) // neueste zuerst
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to list payment plans", e);
+        }
+    }
+
+
+    // Optional: Metadaten speichern
+    public void saveMeta(String fileId, Map<String, String> meta) {
+        Path metaFile = storageDir.resolve(fileId + ".meta.json");
+        try {
+            mapper.writeValue(metaFile.toFile(), meta);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to save metadata", e);
+        }
+    }
+
+    public Map<String, String> loadMeta(String fileId) {
+        Path metaFile = storageDir.resolve(fileId + ".meta.json");
+        try {
+            return mapper.readValue(metaFile.toFile(), Map.class);
+        } catch (IOException e) {
+            return Collections.emptyMap();
+        }
+    }
+
 }
