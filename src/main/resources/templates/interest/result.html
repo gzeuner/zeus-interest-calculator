@@ -100,7 +100,21 @@
 
 <script>
     function toggleYear(y){document.querySelectorAll('#year-'+y).forEach(r=>r.classList.toggle('d-none'));}
-    function toNumber(s){return parseFloat((s||'').replace(/[^0-9,.-]/g,'').replace(/\./g,'').replace(',','.'))||0;}
+    function toNumber(s){
+    if (!s) return 0;
+    s = s.trim();
+
+    // Wenn Komma vorhanden: als Dezimaltrennzeichen interpretieren
+    if (s.includes(',')) {
+        s = s.replace(/\./g, '');       // Tausenderpunkt entfernen
+        s = s.replace(',', '.');        // Komma zu Punkt
+    } else {
+        s = s.replace(/[^0-9.-]/g, ''); // sonst nur Zahlen zulassen
+    }
+
+    return parseFloat(s) || 0;
+}
+
     const fmt=new Intl.NumberFormat('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2});
     function formatEuro(n){return fmt.format(n)+'\u00A0€';}
     document.addEventListener('DOMContentLoaded',()=>{
