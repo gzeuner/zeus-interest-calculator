@@ -13,7 +13,6 @@ Built with:
 - Pro-rata interest for first period
 - Extra payments (Sondertilgungen)
 - Yearly grouping of payment plans
-- JSON download/upload of plans
 - Internationalization (German / English)
 - Simple and clean UI with Bootstrap
 
