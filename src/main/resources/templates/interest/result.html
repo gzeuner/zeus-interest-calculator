@@ -22,28 +22,32 @@
     <span th:text="#{monthly.rate}">Monatliche Rate</span>:
     <span th:text="${monthlyRate} + ' €'">100 €</span>
 </h5>
+
 <!-- === Gespeicherte Pläne laden/löschen === -->
 <div class="mb-4">
     <h5>Gespeicherte Zahlungspläne</h5>
+
+    <!-- 🟢 wird von JS genutzt -->
+    <div th:if="${session.savedPlanId != null}" data-saved-id th:attr="data-saved-id=${session.savedPlanId}"></div>
+
     <div id="planList" class="list-group mb-2"></div>
-    <button class="btn btn-outline-secondary btn-sm" onclick="fetchPlans()">Aktualisieren</button>
 </div>
 
 <p><strong th:text="#{start.date}">Startdatum:</strong> <span th:text="${firstDate}">–</span></p>
-<form th:action="@{/interest/save}" method="post" class="mb-4">
-    <button type="submit" class="btn btn-outline-primary">
-        💾 Plan speichern
-    </button>
-</form>
 
+<!-- === EIN Formular: Speichern + Sonderzahlungen === -->
+<form th:action="@{/interest/save}" th:object="${paymentRequest}" method="post" id="saveForm">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="mb-0">Zahlungsplan</h5>
+        <button type="submit" class="btn btn-outline-primary btn-sm">💾 Plan speichern</button>
+    </div>
 
-<!-- ================= Ergebnis‑Tabelle + Sonderzahlungen ================= -->
-<form th:action="@{/interest/result}" th:object="${paymentRequest}" method="post">
     <input type="hidden" th:field="*{initialValue}"/>
     <input type="hidden" th:field="*{interestRate}"/>
     <input type="hidden" th:field="*{paymentAmount}"/>
     <input type="hidden" th:field="*{paymentMonths}"/>
     <input type="hidden" th:field="*{firstPaymentDate}"/>
+    <input type="hidden" th:field="*{contractDate}"/>
     <input type="hidden" th:field="*{mode}"/>
 
     <table class="table table-bordered table-striped">
@@ -61,11 +65,9 @@
         </thead>
         <tbody>
         <th:block th:each="entry : ${groupedResults.entrySet()}">
-            <!-- ​​Jahres‑Header ​​-->
             <tr class="table-primary year-toggle" th:id="${'group-' + entry.key}" th:onclick="|toggleYear(${entry.key})|">
-                <td colspan="8"><strong th:text="${entry.key}">2025</strong>&nbsp;–&nbsp;<span th:text="#{click.to.toggle}"></span></td>
+                <td colspan="8"><strong th:text="${entry.key}">2025</strong> – <span th:text="#{click.to.toggle}"></span></td>
             </tr>
-            <!-- Summenzeile -->
             <tr class="table-secondary year-summary" th:id="${'summary-' + entry.key}">
                 <td><strong>Summe</strong></td><td></td>
                 <td class="sum-interest">0,00 €</td>
@@ -74,7 +76,6 @@
                 <td></td><td></td>
                 <td class="sum-extra">0,00 €</td>
             </tr>
-            <!-- Monatszeilen -->
             <th:block th:each="row : ${entry.value}">
                 <tr th:id="${'year-' + row.year}" class="month-row">
                     <td th:text="${row.runNumber}">1</td>
@@ -86,10 +87,10 @@
                     <td th:text="${row.repaymentDate}">01.05.2025</td>
                     <td>
                         <input type="text" class="form-control form-control-sm extra-input"
-                               th:field="*{extraPayments[__${row.runNumber}__]}" placeholder="0,00"
+                               th:field="*{extraPayments[__${row.runNumber}__]}"
                                inputmode="decimal"
-                               oninput="this.value=this.value.replace(',','.');"
-                               onkeydown="if(event.key==='Enter'){this.form.submit();}">
+                               placeholder="0,00"
+                               oninput="this.value=this.value.replace(',','.');">
                     </td>
                 </tr>
             </th:block>
@@ -100,45 +101,64 @@
 
 <script>
     function toggleYear(y){document.querySelectorAll('#year-'+y).forEach(r=>r.classList.toggle('d-none'));}
-    function toNumber(s){
-    if (!s) return 0;
-    s = s.trim();
 
-    // Wenn Komma vorhanden: als Dezimaltrennzeichen interpretieren
-    if (s.includes(',')) {
-        s = s.replace(/\./g, '');       // Tausenderpunkt entfernen
-        s = s.replace(',', '.');        // Komma zu Punkt
-    } else {
-        s = s.replace(/[^0-9.-]/g, ''); // sonst nur Zahlen zulassen
+    function toNumber(s){
+        if (!s) return 0;
+        s = s.trim();
+        if (s.includes(',')) {
+            s = s.replace(/\./g, '').replace(',', '.');
+        } else {
+            s = s.replace(/[^0-9.-]/g, '');
+        }
+        return parseFloat(s) || 0;
     }
 
-    return parseFloat(s) || 0;
-}
-
-    const fmt=new Intl.NumberFormat('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const fmt = new Intl.NumberFormat('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2});
     function formatEuro(n){return fmt.format(n)+'\u00A0€';}
-    document.addEventListener('DOMContentLoaded',()=>{
-        const totals={};
-        document.querySelectorAll('tr.month-row').forEach(r=>{
-            const y=r.id.split('-')[1],c=r.querySelectorAll('td');
-            const int=toNumber(c[2].innerText),rate=toNumber(c[3].innerText),chg=toNumber(c[4].innerText);
-            const extraCell=c[7];
-            const extra=extraCell.querySelector('input')?toNumber(extraCell.querySelector('input').value):toNumber(extraCell.innerText);
-            (totals[y]??={interest:0,rate:0,change:0,extra:0});
-            totals[y].interest+=int;totals[y].rate+=rate;totals[y].change+=chg;totals[y].extra+=extra;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        fetchPlans();
+
+        const totals = {};
+        document.querySelectorAll('tr.month-row').forEach(r => {
+            const y = r.id.split('-')[1], c = r.querySelectorAll('td');
+            const int = toNumber(c[2].innerText), rate = toNumber(c[3].innerText), chg = toNumber(c[4].innerText);
+            const extraCell = c[7];
+            const extra = extraCell.querySelector('input') ? toNumber(extraCell.querySelector('input').value) : toNumber(extraCell.innerText);
+            (totals[y] ??= {interest:0, rate:0, change:0, extra:0});
+            totals[y].interest += int; totals[y].rate += rate; totals[y].change += chg; totals[y].extra += extra;
         });
-        Object.entries(totals).forEach(([y,s])=>{
-            const row=document.getElementById('summary-'+y);
-            if(row){row.querySelector('.sum-interest').innerText=formatEuro(s.interest);
-                row.querySelector('.sum-rate').innerText=formatEuro(s.rate);
-                row.querySelector('.sum-change').innerText=formatEuro(s.change);
-                row.querySelector('.sum-extra').innerText=formatEuro(s.extra);} });
-        const ym=new Map();
-        document.querySelectorAll('tr.month-row').forEach(r=>{const y=r.id.split('-')[1];(ym.get(y)||ym.set(y,[]).get(y)).push(r)});
-        const ys=[...ym.keys()];
-        if(ys.length>2){const f=ys[0],l=ys[ys.length-1];ys.forEach(y=>{if(y!==f&&y!==l)ym.get(y).forEach(r=>r.classList.add('d-none'));});}
+        Object.entries(totals).forEach(([y, s]) => {
+            const row = document.getElementById('summary-' + y);
+            if (row) {
+                row.querySelector('.sum-interest').innerText = formatEuro(s.interest);
+                row.querySelector('.sum-rate').innerText = formatEuro(s.rate);
+                row.querySelector('.sum-change').innerText = formatEuro(s.change);
+                row.querySelector('.sum-extra').innerText = formatEuro(s.extra);
+            }
+        });
+
+        const ym = new Map();
+        document.querySelectorAll('tr.month-row').forEach(r => {
+            const y = r.id.split('-')[1];
+            (ym.get(y) || ym.set(y, []).get(y)).push(r);
+        });
+        const ys = [...ym.keys()];
+        if (ys.length > 2) {
+            const f = ys[0], l = ys[ys.length - 1];
+            ys.forEach(y => { if (y !== f && y !== l) ym.get(y).forEach(r => r.classList.add('d-none')); });
+        }
+
+        // 🟢 Liste nach Speichern neu laden
+        const saveForm = document.getElementById('saveForm');
+        if (saveForm) {
+            saveForm.addEventListener('submit', () => {
+                setTimeout(fetchPlans, 700);
+            });
+        }
     });
-    async function fetchPlans() {
+
+     async function fetchPlans() {
         const list = document.getElementById('planList');
         list.innerHTML = '<div class="text-muted">Lade Pläne…</div>';
         try {
@@ -148,36 +168,55 @@
                 list.innerHTML = '<div class="text-muted">Keine gespeicherten Pläne gefunden.</div>';
                 return;
             }
+
             list.innerHTML = '';
-            ids.forEach(id => {
-                const item = document.createElement('div');
-                item.className = 'list-group-item d-flex justify-content-between align-items-center';
-                item.innerHTML = `
-                    <code>${id}</code>
-                    <div>
-                        <a href="/api/plans/${id}/raw" class="btn btn-sm btn-outline-primary me-1" title="Download">⬇️</a>
-                        <button class="btn btn-sm btn-outline-success me-1" onclick="loadPlan('${id}')">Laden</button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deletePlan('${id}')">🗑️</button>
-                    </div>`;
-                list.appendChild(item);
-            });
+            const savedId = document.querySelector('[data-saved-id]')?.getAttribute('data-saved-id');
+
+            const formatDateTime = ts => {
+                const d = new Date(Number(ts));
+                return d.toLocaleDateString('de-DE') + ' ' + d.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+            };
+
+         ids.forEach(id => {
+            const timestampPart = id.split('-')[0];
+            const dateLabel = `🗓️ ${formatDateTime(timestampPart)}`;
+            const isActive = (id === savedId);
+
+            // Badge und Datum immer in eigener Zeile
+            const idHtml = isActive
+                ? `<code>${id}</code><br>
+                   <span class="badge text-bg-success d-block mt-1">📝 aktiv</span><br>
+                   <small class="text-muted d-block mt-1">${dateLabel}</small>`
+                : `<code>${id}</code><br>
+                   <small class="text-muted d-block mt-1">${dateLabel}</small>`;
+
+            const item = document.createElement('div');
+            item.className = 'list-group-item d-flex justify-content-between align-items-center';
+            item.innerHTML = `
+                <div>${idHtml}</div>
+                <div>
+                    <a href="/api/plans/${id}/raw" class="btn btn-sm btn-outline-primary me-1" title="Download">⬇️</a>
+                    <button class="btn btn-sm btn-outline-success me-1" onclick="loadPlan('${id}')">Laden</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deletePlan('${id}')">🗑️</button>
+                </div>`;
+            list.appendChild(item);
+        });
+
         } catch (e) {
             list.innerHTML = '<div class="text-danger">Fehler beim Laden der Liste.</div>';
         }
     }
 
- async function loadPlan(id) {
+    async function loadPlan(id) {
         const res = await fetch(`/api/plans/${id}`);
         if (!res.ok) {
             alert("Fehler beim Laden des Plans.");
             return;
         }
-
         const planJson = await res.json();
         const blob = new Blob([JSON.stringify(planJson)], { type: 'application/json' });
-        const file = new File([blob], "plan.json", { type: 'application/json' });
+        const file = new File([blob], "payment-plan-" + id + ".json", { type: 'application/json' });
 
-        // Formular dynamisch erzeugen
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = '/interest/load';
@@ -193,7 +232,6 @@
 
         form.appendChild(input);
         document.body.appendChild(form);
-
         form.submit();
     }
 
@@ -201,13 +239,11 @@
         if (!confirm('Diesen Plan wirklich löschen?')) return;
         const res = await fetch(`/api/plans/${id}`, {method: 'DELETE'});
         if (res.ok) {
-            fetchPlans(); // neu laden
+            setTimeout(fetchPlans, 200);
         } else {
             alert('Löschen fehlgeschlagen');
         }
     }
-
-    document.addEventListener('DOMContentLoaded', fetchPlans);
 </script>
 
 </body>

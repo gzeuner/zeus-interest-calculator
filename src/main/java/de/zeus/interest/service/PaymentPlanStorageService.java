@@ -99,6 +99,14 @@ public class PaymentPlanStorageService {
         }
     }
 
+    public void saveTo(String fileId, List<PaymentPlanResponse> plan) {
+        Path file = storageDir.resolve(fileId + ".json");
+        try {
+            mapper.writeValue(file.toFile(), plan);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to overwrite payment plan", e);
+        }
+    }
 
     // Optional: Metadaten speichern
     public void saveMeta(String fileId, Map<String, String> meta) {

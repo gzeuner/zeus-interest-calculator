@@ -64,10 +64,10 @@ public class InterestController {
     private final MessageSource messageSource;
     private final PaymentPlanStorageService storageService;
 
-    /* -------------------------------------------------- Init‑Binder -------------------------------------------------- */
+    /* -------------------------------------------------- Init-Binder -------------------------------------------------- */
     @InitBinder
     public void initBinder(WebDataBinder binder) {
-        // Double‑Editor
+        // Double-Editor
         PropertyEditorSupport doubleEditor = new PropertyEditorSupport() {
             @Override public void setAsText(String text) {
                 setValue((text == null || text.isBlank()) ? null
@@ -77,7 +77,7 @@ public class InterestController {
         binder.registerCustomEditor(Double.class, doubleEditor);
         binder.registerCustomEditor(double.class, doubleEditor);
 
-        // LocalDate‑Editor
+        // LocalDate-Editor
         PropertyEditorSupport dateEditor = new PropertyEditorSupport() {
             @Override public void setAsText(String text) {
                 setValue((text == null || text.isBlank()) ? null : LocalDate.parse(text));
@@ -88,22 +88,78 @@ public class InterestController {
 
     /* -------------------------------------------------- Formular anzeigen -------------------------------------------------- */
     @GetMapping
-    public String showForm(Model model, HttpServletRequest request,
+    public String showForm(@RequestParam(value = "planId", required = false) String planId,
+                           Model model,
+                           HttpServletRequest request,
                            @RequestParam(value = "lang", required = false) String lang) {
 
         HttpSession session = request.getSession();
+
+        // Laden über planId → sofort zu /interest/result springen
+        if (planId != null) {
+            List<PaymentPlanResponse> plan = storageService.load(planId);
+            session.setAttribute("results", plan);
+            session.setAttribute("savedPlanId", planId);
+
+            // firstDate und monthlyRate in die Session
+            session.setAttribute("firstDate", plan.isEmpty() ? "" : plan.get(0).getRepaymentDate());
+            String monthlyRate = plan.isEmpty()
+                    ? "0.00"
+                    : plan.get(0).getRegularPaymentAmount();
+            session.setAttribute("monthlyRate", monthlyRate);
+
+            // Sonderzahlungen zurück in DTO übernehmen
+            restoreExtras(session, plan);
+
+            // DTO in Session setzen
+            PaymentPlanRequest dto = (PaymentPlanRequest) session.getAttribute("origRequest");
+            if (dto == null) {
+                dto = new PaymentPlanRequest();
+                dto.setExtraPayments(new HashMap<>());
+            }
+            try {
+                dto.setPaymentAmount(Double.parseDouble(monthlyRate.replace(',', '.')));
+            } catch (Exception ignored) {}
+            session.setAttribute("origRequest", dto);
+
+            // direkt umleiten
+            return "redirect:/interest/result";
+        }
+
+        // kein planId → Formular mit Defaults vorbelegen
         PaymentPlanRequest dto = (PaymentPlanRequest) session.getAttribute("origRequest");
-        if (dto == null) { dto = new PaymentPlanRequest(); dto.setExtraPayments(new HashMap<>()); }
+        if (dto == null) {
+            dto = new PaymentPlanRequest();
+            dto.setExtraPayments(new HashMap<>());
+
+            // Standard-Werte:
+            dto.setInitialValue(15000.0);
+            dto.setInterestRate(5.63);
+            dto.setPaymentAmount(351.2);
+            dto.setPaymentMonths(48);
+
+            LocalDate today = LocalDate.now();
+            dto.setContractDate(today);
+            dto.setFirstPaymentDate(today.plusMonths(2).withDayOfMonth(1));
+        }
         session.setAttribute("origRequest", dto);
 
+        // Sprachwechsel
         if (lang != null && ("de".equals(lang) || "en".equals(lang))) {
             session.setAttribute(SessionLocaleResolver.LOCALE_SESSION_ATTRIBUTE_NAME, new Locale(lang));
         }
 
+        // gespeicherte Plan-IDs
+        model.addAttribute("savedPlanIds", storageService.listAll());
         model.addAttribute("paymentRequest", dto);
         model.addAttribute("currentPath", request.getRequestURI());
+
         Object err = session.getAttribute("errorMessage");
-        if (err != null) { model.addAttribute("errorMessage", err); session.removeAttribute("errorMessage"); }
+        if (err != null) {
+            model.addAttribute("errorMessage", err);
+            session.removeAttribute("errorMessage");
+        }
+
         return "interest/form";
     }
 
@@ -116,7 +172,8 @@ public class InterestController {
                              Model model) {
 
         HttpSession session = httpRequest.getSession();
-        session.setAttribute("origRequest", request);  // immer merken
+        session.removeAttribute("savedPlanId");
+        session.setAttribute("origRequest", request);
 
         if (lang != null && ("de".equals(lang) || "en".equals(lang))) {
             session.setAttribute(SessionLocaleResolver.LOCALE_SESSION_ATTRIBUTE_NAME, new Locale(lang));
@@ -148,7 +205,7 @@ public class InterestController {
         }
     }
 
-    /* -------------------------------------------------- Ergebnis‑Seite -------------------------------------------------- */
+    /* -------------------------------------------------- Ergebnis-Seite -------------------------------------------------- */
     @GetMapping("/result")
     public String showResultPage(HttpServletRequest request, Model model) {
         HttpSession session = request.getSession(false);
@@ -181,7 +238,7 @@ public class InterestController {
                               Model model) {
 
         if (req.getExtraPayments() == null) req.setExtraPayments(new HashMap<>());
-        HttpSession session = httpRequest.getSession(true); // ← wichtig!
+        HttpSession session = httpRequest.getSession(true);
 
         session.setAttribute("origRequest", req);
 
@@ -197,11 +254,9 @@ public class InterestController {
 
             List<PaymentPlanResponse> results = doCalculation(req);
 
-            session.setAttribute("results", results); // ✅ aktualisierter Plan
+            session.setAttribute("results", results);
             session.setAttribute("firstDate", results.isEmpty() ? "" : results.get(0).getRepaymentDate());
             session.setAttribute("monthlyRate", String.format("%.2f", req.getPaymentAmount()));
-
-            // ✅ Erfolgsmeldung übergeben – survives redirect
             redirectAttributes.addFlashAttribute("successMessage", "Sondertilgungen angewendet. Du kannst den neuen Plan speichern.");
 
             return "redirect:/interest/result";
@@ -212,81 +267,36 @@ public class InterestController {
         }
     }
 
-    /* -------------------------------------------------- Validierungen -------------------------------------------------- */
-    private void validateRequest(PaymentPlanRequest request) {
-        if (request.getInterestRate() < 0 || request.getInterestRate() > 100) {
-            throw new IllegalArgumentException(
-                    messageSource.getMessage("validation.interestRate.range", null, Locale.getDefault()));
-        }
-        if (request.getContractDate() == null || request.getFirstPaymentDate() == null) {
-            throw new IllegalArgumentException(
-                    messageSource.getMessage("validation.dates.required", null, Locale.getDefault()));
-        }
-    }
-
-    /** prüft, dass jede Sondertilgung <= Restschuld vor Abzug ist */
-    private void validateExtraPayments(PaymentPlanRequest req) {
-        if (req.getMode() != CalculationMode.LOAN || req.getExtraPayments().isEmpty()) return;
-
-        // Summe für Fehlermeldung
-        double totalExtra = req.getExtraPayments().values().stream()
-                .filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum();
-        if (totalExtra == 0) return;
-
-        // Basisplan ohne Extras
-        Map<Integer, Double> backup = new HashMap<>(req.getExtraPayments());
-        req.setExtraPayments(Collections.emptyMap());
-        List<PaymentPlanResponse> base = doCalculation(req);
-        req.setExtraPayments(backup);
-
-        Map<Integer, Double> debtByRun = base.stream()
-                .collect(Collectors.toMap(r -> Integer.parseInt(r.getRunNumber()),
-                        r -> Double.parseDouble(r.getFutureValue().replace(",", "."))));
-
-        for (var e : backup.entrySet()) {
-            double extra = e.getValue() == null ? 0 : e.getValue();
-            if (extra > debtByRun.getOrDefault(e.getKey(), Double.MAX_VALUE)) {
-                throw new IllegalArgumentException(messageSource.getMessage(
-                        "validation.extraPayments.tooHigh",
-                        new Object[]{
-                                String.format("%.2f", totalExtra),
-                                String.format("%.2f", debtByRun.getOrDefault(e.getKey(), 0.0))
-                        },
-                        Locale.getDefault()));
-            }
-        }
-    }
-
-    /* ---------- SPEICHERN  (Download) ---------- */
+    /* -------------------------------------------------- SPEICHERN  (Download) -------------------------------------------------- */
     @PostMapping("/save")
-    public ResponseEntity<Resource> downloadPlan(HttpServletRequest request) throws IOException {
+    public ResponseEntity<Resource> downloadPlan(
+            @ModelAttribute("paymentRequest") @Valid PaymentPlanRequest request,
+            BindingResult result,
+            HttpServletRequest servletRequest) throws IOException {
 
-        HttpSession session = request.getSession(false);
-        if (session == null) return ResponseEntity.badRequest().build();
+        HttpSession session = servletRequest.getSession(true);
 
-        // Ursprüngliche Anfrage wiederherstellen
-        PaymentPlanRequest orig = (PaymentPlanRequest) session.getAttribute("origRequest");
-        @SuppressWarnings("unchecked")
-        List<PaymentPlanResponse> currentResults =
-                (List<PaymentPlanResponse>) session.getAttribute("results");
+        if (result.hasErrors()) {
+            return ResponseEntity.badRequest()
+                    .body(new ByteArrayResource(("Validierungsfehler: " + result.getAllErrors()).getBytes()));
+        }
 
-        // Falls Sondertilgungen gesetzt sind → Plan neu berechnen
-        List<PaymentPlanResponse> results;
-        if (orig != null && orig.getExtraPayments() != null && !orig.getExtraPayments().isEmpty()) {
-            results = doCalculation(orig);
-            session.setAttribute("results", results); // neuen Plan auch in der Session aktualisieren
+        validateRequest(request);
+        validateExtraPayments(request);
+
+        List<PaymentPlanResponse> results = doCalculation(request);
+
+        String fileId = (String) session.getAttribute("savedPlanId");
+        if (fileId != null) {
+            storageService.saveTo(fileId, results);
         } else {
-            results = currentResults;
+            fileId = storageService.save(results);
+            session.setAttribute("savedPlanId", fileId);
         }
 
-        if (results == null || results.isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        String fileId = storageService.save(results);
-        byte[] data   = storageService.loadRaw(fileId);
-
+        byte[] data = storageService.loadRaw(fileId);
         ByteArrayResource res = new ByteArrayResource(data);
+
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename=\"payment-plan-" + fileId + ".json\"")
@@ -295,7 +305,7 @@ public class InterestController {
                 .body(res);
     }
 
-    /* ---------- LADEN  (Upload) ---------- */
+    /* -------------------------------------------------- LADEN  (Upload) -------------------------------------------------- */
     @PostMapping("/load")
     public String uploadPlan(@RequestParam("planFile") MultipartFile file,
                              HttpServletRequest request,
@@ -305,19 +315,52 @@ public class InterestController {
             model.addAttribute("errorMessage", "Keine Datei ausgewählt.");
             return showResultPage(request, model);
         }
+
         try {
             PaymentPlanResponse[] arr =
                     new ObjectMapper().readValue(file.getInputStream(), PaymentPlanResponse[].class);
+            List<PaymentPlanResponse> plan = List.of(arr);
 
-            request.getSession().setAttribute("results", List.of(arr));
+            HttpSession session = request.getSession(true);
+            session.setAttribute("results", plan);
             model.addAttribute("successMessage", "Plan erfolgreich geladen.");
+
+            String fileName = file.getOriginalFilename();
+            if (fileName != null && fileName.startsWith("payment-plan-") && fileName.endsWith(".json")) {
+                String id = fileName.substring("payment-plan-".length(), fileName.length() - ".json".length());
+                session.setAttribute("savedPlanId", id);
+            }
+
+            // Sonderzahlungen wiederherstellen
+            restoreExtras(session, plan);
+
         } catch (IOException ex) {
             model.addAttribute("errorMessage", "Datei konnte nicht gelesen werden.");
         }
+
         return showResultPage(request, model);
     }
 
-    /* -------------------------------------------------- Helfer‑Methoden -------------------------------------------------- */
+    /* -------------------------------------------------- Hilfsmethoden -------------------------------------------------- */
+
+    /** Restauriert die extraPayments aus der geladenen Antwort in das Request-DTO */
+    private void restoreExtras(HttpSession session, List<PaymentPlanResponse> plan) {
+        PaymentPlanRequest dto = (PaymentPlanRequest) session.getAttribute("origRequest");
+        if (dto == null) {
+            dto = new PaymentPlanRequest();
+        }
+        Map<Integer, Double> extras = plan.stream()
+                .collect(Collectors.toMap(
+                        r -> Integer.parseInt(r.getRunNumber()),
+                        r -> {
+                            String s = r.getExtraPayment().replace(',', '.');
+                            return s.isBlank() ? 0.0 : Double.parseDouble(s);
+                        }
+                ));
+        dto.setExtraPayments(extras);
+        session.setAttribute("origRequest", dto);
+    }
+
     private String errorSave(Model model) {
         model.addAttribute("errorMessage", "Kein Zahlungsplan zum Speichern vorhanden.");
         return "interest/result";
@@ -342,13 +385,15 @@ public class InterestController {
 
         List<PaymentPlanResponse> list = new ArrayList<>();
         PaymentPlanElement plan = createInitialPlan(req);
-        Map<Integer, Double> extras = Optional.ofNullable(req.getExtraPayments())
-                .orElse(Collections.emptyMap());
+        Map<Integer, Double> extras = Optional.ofNullable(req.getExtraPayments()).orElse(Collections.emptyMap());
 
         for (int month = 1; month <= req.getPaymentMonths(); month++) {
 
-            if (!plan.isFirstRun()) plan.setTimeInDays(30);
+            if (!plan.isFirstRun()) {
+                plan.setTimeInDays(30);
+            }
 
+            // initiale Berechnung
             svc.calculate(plan);
 
             // manuelle Zinsen (nur im 1. Monat)
@@ -384,22 +429,24 @@ public class InterestController {
                     double corrected = plan.getRegularPaymentAmount() + plan.getFutureValue();
                     plan.setRegularPaymentAmount(Math.max(0, corrected));
                     svc.calculate(plan);
-                    list.add(mapToResponse(plan, extra)); // ← extra mitgeben
+                    list.add(mapToResponse(plan, extra));
                     break;
                 }
                 if (plan.getInitialValue() < plan.getRegularPaymentAmount()) {
                     plan.setRegularPaymentAmount(plan.getInitialValue());
                     svc.calculate(plan);
-                    list.add(mapToResponse(plan, extra)); // ← extra mitgeben
+                    list.add(mapToResponse(plan, extra));
                     break;
                 }
             }
 
-            list.add(mapToResponse(plan, extra)); // ← extra mitgeben
+            list.add(mapToResponse(plan, extra));
             plan = plan.copyNextRun();
         }
+
         return list;
     }
+
 
     private PaymentPlanElement createInitialPlan(PaymentPlanRequest req) {
         PaymentPlanElement plan = new PaymentPlanElement();
@@ -442,17 +489,55 @@ public class InterestController {
         r.setIsGroup(String.valueOf(e.isLastDayOfYear()));
         r.setIsLastRun(String.valueOf(e.isLastRun()));
         r.setYear(e.getRepaymentDate().getYear());
-
-        // 🟢 Sonderzahlung explizit hinzufügen
         r.setExtraPayment(String.format("%.2f", extraPayment));
-
         return r;
     }
-
 
     private Map<Integer, List<PaymentPlanResponse>> groupByYear(List<PaymentPlanResponse> list) {
         return list.stream()
                 .collect(Collectors.groupingBy(PaymentPlanResponse::getYear,
                         LinkedHashMap::new, Collectors.toList()));
     }
+
+    private void validateRequest(PaymentPlanRequest request) {
+        if (request.getInterestRate() < 0 || request.getInterestRate() > 100) {
+            throw new IllegalArgumentException(
+                    messageSource.getMessage("validation.interestRate.range", null, Locale.getDefault()));
+        }
+        if (request.getContractDate() == null || request.getFirstPaymentDate() == null) {
+            throw new IllegalArgumentException(
+                    messageSource.getMessage("validation.dates.required", null, Locale.getDefault()));
+        }
+    }
+
+    private void validateExtraPayments(PaymentPlanRequest req) {
+        if (req.getMode() != CalculationMode.LOAN || req.getExtraPayments().isEmpty()) return;
+
+        double totalExtra = req.getExtraPayments().values().stream()
+                .filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum();
+        if (totalExtra == 0) return;
+
+        Map<Integer, Double> backup = new HashMap<>(req.getExtraPayments());
+        req.setExtraPayments(Collections.emptyMap());
+        List<PaymentPlanResponse> base = doCalculation(req);
+        req.setExtraPayments(backup);
+
+        Map<Integer, Double> debtByRun = base.stream()
+                .collect(Collectors.toMap(r -> Integer.parseInt(r.getRunNumber()),
+                        r -> Double.parseDouble(r.getFutureValue().replace(",", "."))));
+
+        for (var e : backup.entrySet()) {
+            double extra = e.getValue() == null ? 0 : e.getValue();
+            if (extra > debtByRun.getOrDefault(e.getKey(), Double.MAX_VALUE)) {
+                throw new IllegalArgumentException(messageSource.getMessage(
+                        "validation.extraPayments.tooHigh",
+                        new Object[]{
+                                String.format("%.2f", totalExtra),
+                                String.format("%.2f", debtByRun.getOrDefault(e.getKey(), 0.0))
+                        },
+                        Locale.getDefault()));
+            }
+        }
+    }
+
 }

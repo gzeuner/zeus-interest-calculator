@@ -13,6 +13,11 @@
 
 <h2 th:text="#{form.heading}">Zinsrechner</h2>
 
+<!-- Aktueller Plan -->
+<p th:if="${session.savedPlanId != null}" class="text-muted small">
+    Aktueller Plan in Bearbeitung: <code th:text="${session.savedPlanId}">---</code>
+</p>
+
 <!-- Alerts -->
 <div th:if="${errorMessage}" class="alert alert-danger" role="alert" th:text="${errorMessage}"></div>
 <div th:if="${successMessage}" class="alert alert-success" role="alert" th:text="${successMessage}"></div>
@@ -24,11 +29,22 @@
       method="post"
       class="row g-3">
 
+    <!-- Dropdown für gespeicherte Pläne -->
+    <div class="col-md-6">
+        <label for="savedPlans" class="form-label">Gespeicherte Pläne laden</label>
+        <select class="form-select" id="savedPlans" onchange="loadPlanFromSelect(this)">
+            <option value="">--- Plan auswählen ---</option>
+            <th:block th:each="planId : ${savedPlanIds}">
+                <option th:value="${planId}" th:text="${planId}"></option>
+            </th:block>
+        </select>
+    </div>
+
     <!-- Anfangswert -->
     <div class="col-md-6">
         <label for="initialValue" class="form-label" th:text="#{form.initialValue}">Anfangswert (€)</label>
         <input type="text" class="form-control" id="initialValue" th:field="*{initialValue}"
-               th:value="${#numbers.formatDecimal(paymentRequest.initialValue,1,2,#locale.language=='de'?'COMMA':'POINT')}"
+               th:value="${paymentRequest.initialValue != null ? #numbers.formatDecimal(paymentRequest.initialValue,1,2,#locale.language=='de'?'COMMA':'POINT') : '15000.00'}"
                inputmode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" title="#{form.input.decimal.hint}" required/>
         <div th:if="${#fields.hasErrors('initialValue')}" class="invalid-feedback" th:errors="*{initialValue}"></div>
     </div>
@@ -37,14 +53,14 @@
     <div class="col-md-6">
         <label for="interestRate" class="form-label" th:text="#{form.interestRate}">Zinssatz (%)</label>
         <input type="text" class="form-control" id="interestRate" th:field="*{interestRate}"
-               th:value="${#numbers.formatDecimal(paymentRequest.interestRate,1,2,#locale.language=='de'?'COMMA':'POINT')}"
+               th:value="${paymentRequest.interestRate != null ? #numbers.formatDecimal(paymentRequest.interestRate,1,2,#locale.language=='de'?'COMMA':'POINT') : '5.00'}"
                inputmode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" title="#{form.input.decimal.hint}" required/>
         <div th:if="${#fields.hasErrors('interestRate')}" class="invalid-feedback" th:errors="*{interestRate}"></div>
     </div>
 
     <!-- Manuelle Zinskorrektur -->
     <div class="col-md-6">
-        <label for="manualFirstInterest" class="form-label" th:text="#{form.manualFirstInterest}"></label>
+        <label for="manualFirstInterest" class="form-label" th:text="#{form.manualFirstInterest}">Zinskorrektur</label>
         <input type="text" class="form-control" id="manualFirstInterest" th:field="*{manualFirstInterest}"
                th:value="${paymentRequest.manualFirstInterest != null ? #numbers.formatDecimal(paymentRequest.manualFirstInterest,1,2,#locale.language=='de'?'COMMA':'POINT') : ''}"
                inputmode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" title="#{form.input.decimal.hint}"/>
@@ -54,23 +70,23 @@
 
     <!-- Monatliche Rate -->
     <div class="col-md-6">
-        <label for="paymentAmount" class="form-label" th:text="#{form.paymentAmount}"></label>
+        <label for="paymentAmount" class="form-label" th:text="#{form.paymentAmount}">Monatliche Rate</label>
         <input type="text" class="form-control" id="paymentAmount" th:field="*{paymentAmount}"
-               th:value="${#numbers.formatDecimal(paymentRequest.paymentAmount,1,2,#locale.language=='de'?'COMMA':'POINT')}"
+               th:value="${paymentRequest.paymentAmount != null ? #numbers.formatDecimal(paymentRequest.paymentAmount,1,2,#locale.language=='de'?'COMMA':'POINT') : '300.00'}"
                inputmode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" title="#{form.input.decimal.hint}" required/>
         <div th:if="${#fields.hasErrors('paymentAmount')}" class="invalid-feedback" th:errors="*{paymentAmount}"></div>
     </div>
 
     <!-- Laufzeit -->
     <div class="col-md-6">
-        <label for="paymentMonths" class="form-label" th:text="#{form.paymentMonths}"></label>
+        <label for="paymentMonths" class="form-label" th:text="#{form.paymentMonths}">Laufzeit (Monate)</label>
         <input type="number" class="form-control" id="paymentMonths" th:field="*{paymentMonths}" min="1" required/>
         <div th:if="${#fields.hasErrors('paymentMonths')}" class="invalid-feedback" th:errors="*{paymentMonths}"></div>
     </div>
 
     <!-- Vertragsdatum -->
     <div class="col-md-6">
-        <label for="contractDate" class="form-label" th:text="#{form.contractDate}"></label>
+        <label for="contractDate" class="form-label" th:text="#{form.contractDate}">Vertragsdatum</label>
         <input type="date" class="form-control" id="contractDate" th:field="*{contractDate}" required/>
         <small class="form-text text-muted" th:text="#{form.contractDateHint}"></small>
         <div th:if="${#fields.hasErrors('contractDate')}" class="invalid-feedback" th:errors="*{contractDate}"></div>
@@ -78,7 +94,7 @@
 
     <!-- Startdatum -->
     <div class="col-md-6">
-        <label for="firstPaymentDate" class="form-label" th:text="#{form.firstPaymentDate}"></label>
+        <label for="firstPaymentDate" class="form-label" th:text="#{form.firstPaymentDate}">Erste Abbuchung</label>
         <input type="date" class="form-control" id="firstPaymentDate" th:field="*{firstPaymentDate}" required/>
         <small class="form-text text-muted" th:text="#{form.dateHint}"></small>
         <div th:if="${#fields.hasErrors('firstPaymentDate')}" class="invalid-feedback" th:errors="*{firstPaymentDate}"></div>
@@ -86,7 +102,7 @@
 
     <!-- Modus -->
     <div class="col-md-6">
-        <label for="mode" class="form-label" th:text="#{form.mode}"></label>
+        <label for="mode" class="form-label" th:text="#{form.mode}">Berechnungsmodus</label>
         <select class="form-select" id="mode" th:field="*{mode}">
             <option value="LOAN" th:text="#{form.mode.loan}">Kredit</option>
             <option value="DEPOSIT" th:text="#{form.mode.deposit}">Einlage</option>
@@ -99,6 +115,15 @@
         <button type="submit" class="btn btn-primary" th:text="#{form.button}">Berechnen</button>
     </div>
 </form>
+
+<script>
+    function loadPlanFromSelect(selectElement) {
+        const selectedPlanId = selectElement.value;
+        if (selectedPlanId) {
+            window.location.href = `/interest?planId=${selectedPlanId}`;
+        }
+    }
+</script>
 
 </body>
 </html>
